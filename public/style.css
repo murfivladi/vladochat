@@ -1,0 +1,6 @@
+body { font-family: sans-serif; }
+.hidden { display: none; }
+#messages { height: 200px; overflow-y: auto; border: 1px solid #ccc; margin-bottom: 10px; padding:5px; }
+#userList { margin-bottom: 5px; }
+#videoContainer { margin-top: 10px; }
+video { width: 45%; border:1px solid #000; }

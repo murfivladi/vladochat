@@ -1,0 +1,20 @@
+{
+  "name": "vladochat",
+  "version": "1.0.0",
+  "description": "Minimal realtime chat example with WebRTC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "mocha"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "mocha": "^10.4.0",
+    "supertest": "^6.3.3"
+  }
+}
