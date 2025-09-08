@@ -1,101 +1,85 @@
 "use client"
 
-import { useState, useEffect, createContext, useContext, type ReactNode } from "react"
+import type React from "react"
 
-export interface User {
-  id: string
-  email: string
-  name: string
-  avatar?: string
-  isOnline: boolean
-  lastSeen: Date
-}
+import { createClient } from "@/lib/supabase/client"
+import type { User } from "@supabase/supabase-js"
+import { useRouter } from "next/navigation"
+import { createContext, useContext, useEffect, useState } from "react"
 
 interface AuthContextType {
   user: User | null
-  login: (email: string, password: string) => Promise<boolean>
-  register: (email: string, password: string, name: string) => Promise<boolean>
-  logout: () => void
   loading: boolean
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string, displayName: string) => Promise<void>
+  signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const router = useRouter()
+  const supabase = createClient()
 
   useEffect(() => {
-    // Check for existing session
-    const savedUser = localStorage.getItem("vladochat_user")
-    if (savedUser) {
-      const userData = JSON.parse(savedUser)
-      setUser({ ...userData, isOnline: true, lastSeen: new Date() })
+    // Get initial session
+    const getInitialSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      setUser(session?.user ?? null)
+      setLoading(false)
     }
-    setLoading(false)
-  }, [])
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Simulate API call
-    const users = JSON.parse(localStorage.getItem("vladochat_users") || "[]")
-    const existingUser = users.find((u: any) => u.email === email && u.password === password)
+    getInitialSession()
 
-    if (existingUser) {
-      const userData: User = {
-        id: existingUser.id,
-        email: existingUser.email,
-        name: existingUser.name,
-        avatar: existingUser.avatar,
-        isOnline: true,
-        lastSeen: new Date(),
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setUser(session?.user ?? null)
+      setLoading(false)
+
+      if (event === "SIGNED_IN") {
+        router.push("/chat")
+      } else if (event === "SIGNED_OUT") {
+        router.push("/")
       }
-      setUser(userData)
-      localStorage.setItem("vladochat_user", JSON.stringify(userData))
-      return true
-    }
-    return false
-  }
+    })
 
-  const register = async (email: string, password: string, name: string): Promise<boolean> => {
-    // Simulate API call
-    const users = JSON.parse(localStorage.getItem("vladochat_users") || "[]")
-    const existingUser = users.find((u: any) => u.email === email)
+    return () => subscription.unsubscribe()
+  }, [supabase.auth, router])
 
-    if (existingUser) {
-      return false // User already exists
-    }
-
-    const newUser = {
-      id: Date.now().toString(),
+  const signIn = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      password, // In production, this would be hashed
-      name,
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
-      createdAt: new Date(),
-    }
-
-    users.push(newUser)
-    localStorage.setItem("vladochat_users", JSON.stringify(users))
-
-    const userData: User = {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-      avatar: newUser.avatar,
-      isOnline: true,
-      lastSeen: new Date(),
-    }
-    setUser(userData)
-    localStorage.setItem("vladochat_user", JSON.stringify(userData))
-    return true
+      password,
+    })
+    if (error) throw error
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem("vladochat_user")
+  const signUp = async (email: string, password: string, displayName: string) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/chat`,
+        data: {
+          display_name: displayName,
+        },
+      },
+    })
+    if (error) throw error
   }
 
-  return <AuthContext.Provider value={{ user, login, register, logout, loading }}>{children}</AuthContext.Provider>
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
+  }
+
+  return <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

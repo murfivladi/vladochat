@@ -16,22 +16,12 @@ import { useWebRTC } from "@/hooks/use-webrtc"
 import { useNotifications } from "@/hooks/use-notifications"
 
 export function ChatApp() {
-  const { user, logout } = useAuth()
-  const { chats, activeChat, setActiveChat, createNewChat } = useChat()
+  const { user, signOut } = useAuth()
+  const { chats, activeChat, setActiveChat, createNewChat, loading } = useChat()
   const { simulateIncomingCall } = useWebRTC()
   const { requestPermission, permission } = useNotifications()
   const [activeView, setActiveView] = useState<"chats" | "groups" | "calls">("chats")
   const [searchQuery, setSearchQuery] = useState("")
-  const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    // Simulate initial loading
-    const timer = setTimeout(() => {
-      setIsLoading(false)
-    }, 1000)
-
-    return () => clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     if (user && permission === "default") {
@@ -41,24 +31,38 @@ export function ChatApp() {
     }
   }, [user, permission, requestPermission])
 
-  const filteredChats = chats.filter((chat) => chat.name.toLowerCase().includes(searchQuery.toLowerCase()))
+  const filteredChats = chats.filter((chat) => {
+    const chatName =
+      chat.name ||
+      (chat.type === "direct"
+        ? chat.participants.find((p) => p.user_id !== user?.id)?.user.display_name || "Chat"
+        : "Gruppo")
+    return chatName.toLowerCase().includes(searchQuery.toLowerCase())
+  })
 
   const handleDemoIncomingCall = () => {
-    const randomChat = chats.find((chat) => !chat.isGroup)
+    const randomChat = chats.find((chat) => chat.type === "direct")
     if (randomChat) {
-      const participantId = randomChat.participants.find((p) => p !== user?.id) || ""
-      simulateIncomingCall(participantId, randomChat.name, "video", randomChat.avatar)
+      const otherParticipant = randomChat.participants.find((p) => p.user_id !== user?.id)
+      if (otherParticipant) {
+        simulateIncomingCall(
+          otherParticipant.user_id,
+          otherParticipant.user.display_name,
+          "video",
+          otherParticipant.user.avatar_url,
+        )
+      }
     }
   }
 
-  if (isLoading) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4">
           <LoadingSpinner size="lg" />
           <div className="space-y-2">
             <h2 className="text-xl font-semibold">Caricamento VladoChat...</h2>
-            <p className="text-muted-foreground">Preparazione dell'interfaccia</p>
+            <p className="text-muted-foreground">Connessione al database...</p>
           </div>
         </div>
       </div>
@@ -77,11 +81,13 @@ export function ChatApp() {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Avatar>
-                <AvatarImage src={user?.avatar || "/placeholder.svg"} />
-                <AvatarFallback>{user?.name?.charAt(0)}</AvatarFallback>
+                <AvatarImage src={user?.user_metadata?.avatar_url || "/placeholder.svg"} />
+                <AvatarFallback>
+                  {user?.user_metadata?.display_name?.charAt(0) || user?.email?.charAt(0)}
+                </AvatarFallback>
               </Avatar>
               <div className="hidden sm:block">
-                <h2 className="font-semibold">{user?.name}</h2>
+                <h2 className="font-semibold">{user?.user_metadata?.display_name || user?.email}</h2>
                 <p className="text-sm text-muted-foreground">Online</p>
               </div>
             </div>
@@ -105,7 +111,7 @@ export function ChatApp() {
               <Button variant="ghost" size="icon">
                 <MoreVertical className="h-4 w-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={logout}>
+              <Button variant="ghost" size="icon" onClick={signOut}>
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>

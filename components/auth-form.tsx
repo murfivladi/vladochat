@@ -14,7 +14,7 @@ import { MessageCircle } from "lucide-react"
 
 export function AuthForm() {
   const [isLoading, setIsLoading] = useState(false)
-  const { login, register } = useAuth()
+  const { signIn, signUp } = useAuth()
   const { toast } = useToast()
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -25,12 +25,16 @@ export function AuthForm() {
     const email = formData.get("email") as string
     const password = formData.get("password") as string
 
-    const success = await login(email, password)
-
-    if (!success) {
+    try {
+      await signIn(email, password)
+      toast({
+        title: "Accesso effettuato",
+        description: "Benvenuto in VladoChat!",
+      })
+    } catch (error) {
       toast({
         title: "Errore di accesso",
-        description: "Email o password non corretti",
+        description: error instanceof Error ? error.message : "Email o password non corretti",
         variant: "destructive",
       })
     }
@@ -47,18 +51,17 @@ export function AuthForm() {
     const password = formData.get("password") as string
     const name = formData.get("name") as string
 
-    const success = await register(email, password, name)
-
-    if (!success) {
-      toast({
-        title: "Errore di registrazione",
-        description: "Un utente con questa email esiste già",
-        variant: "destructive",
-      })
-    } else {
+    try {
+      await signUp(email, password, name)
       toast({
         title: "Registrazione completata",
-        description: "Benvenuto in VladoChat!",
+        description: "Controlla la tua email per confermare l'account",
+      })
+    } catch (error) {
+      toast({
+        title: "Errore di registrazione",
+        description: error instanceof Error ? error.message : "Errore durante la registrazione",
+        variant: "destructive",
       })
     }
 

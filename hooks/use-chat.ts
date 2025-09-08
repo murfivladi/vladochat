@@ -1,263 +1,219 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 import { useAuth } from "./use-auth"
-import { useRealtime } from "./use-realtime"
+import type { RealtimeChannel } from "@supabase/supabase-js"
 
 export interface Message {
   id: string
-  text: string
-  senderId: string
-  senderName: string
-  timestamp: Date
+  content: string
+  sender_id: string
+  chat_id: string
   type: "text" | "image" | "audio" | "video" | "document" | "system"
-  status: "sent" | "delivered" | "read"
-  mediaUrl?: string
-  mediaName?: string
-  mediaSize?: number
-}
-
-export interface GroupMember {
-  id: string
-  name: string
-  avatar?: string
-  role: "admin" | "member"
-  joinedAt: Date
+  file_url?: string
+  file_name?: string
+  file_size?: number
+  reply_to?: string
+  created_at: string
+  updated_at: string
+  sender?: {
+    id: string
+    display_name: string
+    avatar_url?: string
+  }
 }
 
 export interface Chat {
   id: string
-  name: string
-  avatar?: string
-  description?: string
-  lastMessage?: Message
-  unreadCount: number
-  isGroup: boolean
-  participants: string[]
-  groupMembers?: GroupMember[]
-  groupAdmins?: string[]
-  createdBy?: string
-  createdAt?: Date
-  isOnline?: boolean
-  lastSeen?: Date
-  messages: Message[]
+  name?: string
+  type: "direct" | "group"
+  avatar_url?: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  participants: Array<{
+    id: string
+    user_id: string
+    role: "admin" | "member"
+    joined_at: string
+    user: {
+      id: string
+      display_name: string
+      avatar_url?: string
+      status: string
+    }
+  }>
+  messages?: Message[]
+  unread_count?: number
 }
-
-const mockChats: Chat[] = [
-  {
-    id: "1",
-    name: "Marco Rossi",
-    avatar: "/thoughtful-man.png",
-    unreadCount: 2,
-    isGroup: false,
-    participants: ["user1", "marco"],
-    isOnline: true,
-    messages: [
-      {
-        id: "1",
-        text: "Ciao! Come stai?",
-        senderId: "marco",
-        senderName: "Marco Rossi",
-        timestamp: new Date(Date.now() - 1000 * 60 * 5),
-        type: "text",
-        status: "read",
-      },
-      {
-        id: "2",
-        text: "Tutto bene, grazie! Tu?",
-        senderId: "user1",
-        senderName: "Tu",
-        timestamp: new Date(Date.now() - 1000 * 60 * 3),
-        type: "text",
-        status: "delivered",
-      },
-    ],
-  },
-  {
-    id: "2",
-    name: "Famiglia",
-    avatar: "/diverse-family-portrait.png",
-    description: "Chat di famiglia per organizzare eventi e condividere momenti",
-    unreadCount: 0,
-    isGroup: true,
-    participants: ["user1", "mamma", "papa", "sorella"],
-    groupMembers: [
-      { id: "user1", name: "Tu", role: "admin", joinedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30) },
-      {
-        id: "mamma",
-        name: "Mamma",
-        avatar: "/diverse-woman-portrait.png",
-        role: "admin",
-        joinedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30),
-      },
-      {
-        id: "papa",
-        name: "Papà",
-        avatar: "/thoughtful-man.png",
-        role: "member",
-        joinedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 25),
-      },
-      { id: "sorella", name: "Sorella", role: "member", joinedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 20) },
-    ],
-    groupAdmins: ["user1", "mamma"],
-    createdBy: "user1",
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30),
-    messages: [
-      {
-        id: "3",
-        text: "Ci vediamo domenica per pranzo?",
-        senderId: "mamma",
-        senderName: "Mamma",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-        type: "text",
-        status: "read",
-      },
-    ],
-  },
-  {
-    id: "3",
-    name: "Giulia Bianchi",
-    avatar: "/diverse-woman-portrait.png",
-    unreadCount: 1,
-    isGroup: false,
-    participants: ["user1", "giulia"],
-    isOnline: false,
-    lastSeen: new Date(Date.now() - 1000 * 60 * 30),
-    messages: [
-      {
-        id: "4",
-        text: "Hai visto il film ieri sera?",
-        senderId: "giulia",
-        senderName: "Giulia Bianchi",
-        timestamp: new Date(Date.now() - 1000 * 60 * 15),
-        type: "text",
-        status: "sent",
-      },
-    ],
-  },
-]
 
 export function useChat() {
   const { user } = useAuth()
-  const { sendMessage: sendRealtimeMessage, realtimeManager } = useRealtime()
   const [chats, setChats] = useState<Chat[]>([])
   const [activeChat, setActiveChat] = useState<Chat | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [realtimeChannel, setRealtimeChannel] = useState<RealtimeChannel | null>(null)
+  const supabase = createClient()
 
   useEffect(() => {
-    // Carica chat dal localStorage o usa mock data
-    const savedChats = localStorage.getItem("vladochat-chats")
-    if (savedChats) {
-      const parsedChats = JSON.parse(savedChats)
-      // Converti timestamp strings back to Date objects
-      const chatsWithDates = parsedChats.map((chat: any) => ({
-        ...chat,
-        messages: chat.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        })),
-        lastSeen: chat.lastSeen ? new Date(chat.lastSeen) : undefined,
-        createdAt: chat.createdAt ? new Date(chat.createdAt) : undefined,
-        groupMembers: chat.groupMembers?.map((member: any) => ({
-          ...member,
-          joinedAt: new Date(member.joinedAt),
-        })),
-      }))
-      setChats(chatsWithDates)
-    } else {
-      setChats(mockChats)
-    }
-  }, [])
-
-  useEffect(() => {
-    const handleNewMessage = (data: { message: Message; chatId: string }) => {
-      setChats((prevChats) =>
-        prevChats.map((chat) =>
-          chat.id === data.chatId
-            ? {
-                ...chat,
-                messages: [...chat.messages, data.message],
-                lastMessage: data.message,
-              }
-            : chat,
-        ),
-      )
-    }
-
-    const handleMessageStatus = (data: { messageId: string; status: "sent" | "delivered" | "read" }) => {
-      setChats((prevChats) =>
-        prevChats.map((chat) => ({
-          ...chat,
-          messages: chat.messages.map((msg) => (msg.id === data.messageId ? { ...msg, status: data.status } : msg)),
-        })),
-      )
-    }
-
-    realtimeManager.on("new-message", handleNewMessage)
-    realtimeManager.on("message-status", handleMessageStatus)
-
-    return () => {
-      realtimeManager.off("new-message", handleNewMessage)
-      realtimeManager.off("message-status", handleMessageStatus)
-    }
-  }, [realtimeManager])
-
-  useEffect(() => {
-    // Salva chat nel localStorage
-    if (chats.length > 0) {
-      localStorage.setItem("vladochat-chats", JSON.stringify(chats))
-    }
-  }, [chats])
-
-  const sendMessage = (chatId: string, text: string) => {
     if (!user) return
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text,
-      senderId: user.id,
-      senderName: user.name,
-      timestamp: new Date(),
-      type: "text",
-      status: "sent",
-    }
+    const loadChats = async () => {
+      try {
+        const { data: chatParticipants, error } = await supabase
+          .from("chat_participants")
+          .select(`
+            chat_id,
+            role,
+            joined_at,
+            chats!inner (
+              id,
+              name,
+              type,
+              avatar_url,
+              created_by,
+              created_at,
+              updated_at
+            )
+          `)
+          .eq("user_id", user.id)
+          .order("joined_at", { ascending: false })
 
-    sendRealtimeMessage(newMessage, chatId)
+        if (error) throw error
 
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, newMessage],
-              lastMessage: newMessage,
-            }
-          : chat,
-      ),
-    )
-
-    // Simula risposta automatica dopo 2 secondi
-    setTimeout(() => {
-      const responses = ["Interessante!", "Capisco", "Dimmi di più", "Perfetto!", "Va bene", "Ci sentiamo dopo"]
-
-      const chat = chats.find((c) => c.id === chatId)
-      if (chat && !chat.isGroup) {
-        const otherParticipant = chat.participants.find((p) => p !== user.id)
-        const autoReply: Message = {
-          id: (Date.now() + 1).toString(),
-          text: responses[Math.floor(Math.random() * responses.length)],
-          senderId: otherParticipant || "bot",
-          senderName: chat.name,
-          timestamp: new Date(),
-          type: "text",
-          status: "delivered",
+        // Get full chat details with participants
+        const chatIds = chatParticipants?.map((cp) => cp.chat_id) || []
+        if (chatIds.length === 0) {
+          setChats([])
+          setLoading(false)
+          return
         }
 
-        sendRealtimeMessage(autoReply, chatId)
+        const { data: fullChats, error: chatsError } = await supabase
+          .from("chats")
+          .select(`
+            *,
+            participants:chat_participants (
+              id,
+              user_id,
+              role,
+              joined_at,
+              user:profiles (
+                id,
+                display_name,
+                avatar_url,
+                status
+              )
+            )
+          `)
+          .in("id", chatIds)
+          .order("updated_at", { ascending: false })
+
+        if (chatsError) throw chatsError
+
+        setChats(fullChats || [])
+      } catch (error) {
+        console.error("Error loading chats:", error)
+      } finally {
+        setLoading(false)
       }
-    }, 2000)
+    }
+
+    loadChats()
+  }, [user, supabase])
+
+  useEffect(() => {
+    if (!user) return
+
+    const channel = supabase
+      .channel("chat-updates")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
+        (payload) => {
+          const newMessage = payload.new as Message
+          setChats((prevChats) =>
+            prevChats.map((chat) =>
+              chat.id === newMessage.chat_id ? { ...chat, messages: [...(chat.messages || []), newMessage] } : chat,
+            ),
+          )
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "chats",
+        },
+        (payload) => {
+          const updatedChat = payload.new as any
+          setChats((prevChats) =>
+            prevChats.map((chat) => (chat.id === updatedChat.id ? { ...chat, ...updatedChat } : chat)),
+          )
+        },
+      )
+      .subscribe()
+
+    setRealtimeChannel(channel)
+
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [user, supabase])
+
+  useEffect(() => {
+    if (!activeChat) return
+
+    const loadMessages = async () => {
+      try {
+        const { data: messages, error } = await supabase
+          .from("messages")
+          .select(`
+            *,
+            sender:profiles (
+              id,
+              display_name,
+              avatar_url
+            )
+          `)
+          .eq("chat_id", activeChat.id)
+          .order("created_at", { ascending: true })
+
+        if (error) throw error
+
+        setActiveChat((prev) => (prev ? { ...prev, messages: messages || [] } : null))
+      } catch (error) {
+        console.error("Error loading messages:", error)
+      }
+    }
+
+    loadMessages()
+  }, [activeChat, supabase])
+
+  const sendMessage = async (chatId: string, content: string) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase.from("messages").insert({
+        chat_id: chatId,
+        sender_id: user.id,
+        content,
+        type: "text",
+      })
+
+      if (error) throw error
+    } catch (error) {
+      console.error("Error sending message:", error)
+    }
   }
 
-  const sendMediaMessage = (chatId: string, file: File, mediaUrl: string) => {
+  const sendMediaMessage = async (chatId: string, file: File, fileUrl: string) => {
     if (!user) return
 
     const getMessageType = (fileType: string): Message["type"] => {
@@ -267,273 +223,194 @@ export function useChat() {
       return "document"
     }
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text: file.name,
-      senderId: user.id,
-      senderName: user.name,
-      timestamp: new Date(),
-      type: getMessageType(file.type),
-      status: "sent",
-      mediaUrl,
-      mediaName: file.name,
-      mediaSize: file.size,
+    try {
+      const { error } = await supabase.from("messages").insert({
+        chat_id: chatId,
+        sender_id: user.id,
+        content: file.name,
+        type: getMessageType(file.type),
+        file_url: fileUrl,
+        file_name: file.name,
+        file_size: file.size,
+      })
+
+      if (error) throw error
+    } catch (error) {
+      console.error("Error sending media message:", error)
     }
-
-    sendRealtimeMessage(newMessage, chatId)
-
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, newMessage],
-              lastMessage: newMessage,
-            }
-          : chat,
-      ),
-    )
   }
 
-  const sendVoiceMessage = (chatId: string, recording: any) => {
+  const sendVoiceMessage = async (chatId: string, recording: any) => {
     if (!user) return
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text: `Messaggio vocale (${Math.floor(recording.duration / 60)}:${(recording.duration % 60).toString().padStart(2, "0")})`,
-      senderId: user.id,
-      senderName: user.name,
-      timestamp: new Date(),
-      type: "audio",
-      status: "sent",
-      mediaUrl: recording.url,
-      mediaName: `voice_${Date.now()}.webm`,
-      mediaSize: recording.blob.size,
+    try {
+      const { error } = await supabase.from("messages").insert({
+        chat_id: chatId,
+        sender_id: user.id,
+        content: `Messaggio vocale (${Math.floor(recording.duration / 60)}:${(recording.duration % 60).toString().padStart(2, "0")})`,
+        type: "audio",
+        file_url: recording.url,
+        file_name: `voice_${Date.now()}.webm`,
+        file_size: recording.blob.size,
+      })
+
+      if (error) throw error
+    } catch (error) {
+      console.error("Error sending voice message:", error)
     }
-
-    sendRealtimeMessage(newMessage, chatId)
-
-    setChats((prevChats) =>
-      prevChats.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              messages: [...chat.messages, newMessage],
-              lastMessage: newMessage,
-            }
-          : chat,
-      ),
-    )
   }
 
-  const createNewChat = () => {
-    const names = ["Alessandro", "Francesca", "Luca", "Valentina", "Matteo", "Chiara"]
-    const randomName = names[Math.floor(Math.random() * names.length)]
+  const createNewChat = async () => {
+    if (!user) return
 
-    const newChat: Chat = {
-      id: Date.now().toString(),
-      name: randomName,
-      avatar: `/placeholder.svg?height=40&width=40&query=${randomName}`,
-      unreadCount: 0,
-      isGroup: false,
-      participants: [user?.id || "user1", randomName.toLowerCase()],
-      isOnline: Math.random() > 0.5,
-      messages: [],
+    // For demo purposes, create a chat with a random user
+    // In a real app, you'd select from available users
+    const demoUsers = [
+      { id: "demo1", name: "Alessandro Demo" },
+      { id: "demo2", name: "Francesca Demo" },
+      { id: "demo3", name: "Luca Demo" },
+    ]
+
+    const randomUser = demoUsers[Math.floor(Math.random() * demoUsers.length)]
+
+    try {
+      // Use the create_direct_chat function
+      const { data, error } = await supabase.rpc("create_direct_chat", {
+        other_user_id: randomUser.id,
+      })
+
+      if (error) throw error
+
+      // Reload chats to show the new one
+      window.location.reload()
+    } catch (error) {
+      console.error("Error creating chat:", error)
     }
-
-    setChats((prev) => [newChat, ...prev])
-    setActiveChat(newChat)
   }
 
-  const createGroup = (name: string, description: string, selectedMembers: string[]) => {
+  const createGroup = async (name: string, description: string, selectedMembers: string[]) => {
     if (!user) return
 
-    const groupId = Date.now().toString()
-    const allParticipants = [user.id, ...selectedMembers]
+    try {
+      // Create the group chat
+      const { data: chat, error: chatError } = await supabase
+        .from("chats")
+        .insert({
+          name,
+          type: "group",
+          created_by: user.id,
+        })
+        .select()
+        .single()
 
-    const groupMembers: GroupMember[] = allParticipants.map((participantId, index) => ({
-      id: participantId,
-      name: participantId === user.id ? user.name : `Utente ${index}`,
-      role: participantId === user.id ? "admin" : "member",
-      joinedAt: new Date(),
-    }))
+      if (chatError) throw chatError
 
-    const systemMessage: Message = {
-      id: `${groupId}-created`,
-      text: `${user.name} ha creato il gruppo`,
-      senderId: "system",
-      senderName: "Sistema",
-      timestamp: new Date(),
-      type: "system",
-      status: "read",
+      // Add creator as admin
+      const participants = [
+        { chat_id: chat.id, user_id: user.id, role: "admin" },
+        ...selectedMembers.map((memberId) => ({
+          chat_id: chat.id,
+          user_id: memberId,
+          role: "member" as const,
+        })),
+      ]
+
+      const { error: participantsError } = await supabase.from("chat_participants").insert(participants)
+
+      if (participantsError) throw participantsError
+
+      // Add system message
+      const { error: messageError } = await supabase.from("messages").insert({
+        chat_id: chat.id,
+        sender_id: user.id,
+        content: `${user.display_name} ha creato il gruppo`,
+        type: "system",
+      })
+
+      if (messageError) throw messageError
+
+      // Reload chats
+      window.location.reload()
+    } catch (error) {
+      console.error("Error creating group:", error)
     }
+  }
 
-    const newGroup: Chat = {
-      id: groupId,
-      name,
-      description,
-      avatar: `/placeholder.svg?height=40&width=40&query=group-${name}`,
-      unreadCount: 0,
-      isGroup: true,
-      participants: allParticipants,
-      groupMembers,
-      groupAdmins: [user.id],
-      createdBy: user.id,
-      createdAt: new Date(),
-      messages: [systemMessage],
+  const addMemberToGroup = async (chatId: string, memberId: string, memberName: string) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase.from("chat_participants").insert({
+        chat_id: chatId,
+        user_id: memberId,
+        role: "member",
+      })
+
+      if (error) throw error
+
+      // Add system message
+      await supabase.from("messages").insert({
+        chat_id: chatId,
+        sender_id: user.id,
+        content: `${user.display_name} ha aggiunto ${memberName} al gruppo`,
+        type: "system",
+      })
+    } catch (error) {
+      console.error("Error adding member:", error)
     }
-
-    setChats((prev) => [newGroup, ...prev])
-    setActiveChat(newGroup)
   }
 
-  const addMemberToGroup = (chatId: string, memberId: string, memberName: string) => {
+  const removeMemberFromGroup = async (chatId: string, memberId: string) => {
     if (!user) return
 
-    setChats((prevChats) =>
-      prevChats.map((chat) => {
-        if (chat.id === chatId && chat.isGroup) {
-          const isAlreadyMember = chat.participants.includes(memberId)
-          if (isAlreadyMember) return chat
+    try {
+      const { error } = await supabase.from("chat_participants").delete().eq("chat_id", chatId).eq("user_id", memberId)
 
-          const newMember: GroupMember = {
-            id: memberId,
-            name: memberName,
-            role: "member",
-            joinedAt: new Date(),
-          }
-
-          const systemMessage: Message = {
-            id: `${Date.now()}-member-added`,
-            text: `${user.name} ha aggiunto ${memberName} al gruppo`,
-            senderId: "system",
-            senderName: "Sistema",
-            timestamp: new Date(),
-            type: "system",
-            status: "read",
-          }
-
-          return {
-            ...chat,
-            participants: [...chat.participants, memberId],
-            groupMembers: [...(chat.groupMembers || []), newMember],
-            messages: [...chat.messages, systemMessage],
-            lastMessage: systemMessage,
-          }
-        }
-        return chat
-      }),
-    )
+      if (error) throw error
+    } catch (error) {
+      console.error("Error removing member:", error)
+    }
   }
 
-  const removeMemberFromGroup = (chatId: string, memberId: string) => {
+  const promoteToAdmin = async (chatId: string, memberId: string) => {
     if (!user) return
 
-    setChats((prevChats) =>
-      prevChats.map((chat) => {
-        if (chat.id === chatId && chat.isGroup) {
-          const member = chat.groupMembers?.find((m) => m.id === memberId)
-          if (!member) return chat
+    try {
+      const { error } = await supabase
+        .from("chat_participants")
+        .update({ role: "admin" })
+        .eq("chat_id", chatId)
+        .eq("user_id", memberId)
 
-          const systemMessage: Message = {
-            id: `${Date.now()}-member-removed`,
-            text: `${member.name} ha lasciato il gruppo`,
-            senderId: "system",
-            senderName: "Sistema",
-            timestamp: new Date(),
-            type: "system",
-            status: "read",
-          }
-
-          return {
-            ...chat,
-            participants: chat.participants.filter((p) => p !== memberId),
-            groupMembers: chat.groupMembers?.filter((m) => m.id !== memberId),
-            messages: [...chat.messages, systemMessage],
-            lastMessage: systemMessage,
-          }
-        }
-        return chat
-      }),
-    )
+      if (error) throw error
+    } catch (error) {
+      console.error("Error promoting member:", error)
+    }
   }
 
-  const promoteToAdmin = (chatId: string, memberId: string) => {
+  const updateGroupInfo = async (chatId: string, name: string, description?: string) => {
     if (!user) return
 
-    setChats((prevChats) =>
-      prevChats.map((chat) => {
-        if (chat.id === chatId && chat.isGroup) {
-          const member = chat.groupMembers?.find((m) => m.id === memberId)
-          if (!member || member.role === "admin") return chat
+    try {
+      const { error } = await supabase.from("chats").update({ name }).eq("id", chatId)
 
-          const systemMessage: Message = {
-            id: `${Date.now()}-promoted`,
-            text: `${member.name} è ora amministratore del gruppo`,
-            senderId: "system",
-            senderName: "Sistema",
-            timestamp: new Date(),
-            type: "system",
-            status: "read",
-          }
-
-          return {
-            ...chat,
-            groupMembers: chat.groupMembers?.map((m) => (m.id === memberId ? { ...m, role: "admin" } : m)),
-            groupAdmins: [...(chat.groupAdmins || []), memberId],
-            messages: [...chat.messages, systemMessage],
-            lastMessage: systemMessage,
-          }
-        }
-        return chat
-      }),
-    )
-  }
-
-  const updateGroupInfo = (chatId: string, name: string, description: string) => {
-    if (!user) return
-
-    setChats((prevChats) =>
-      prevChats.map((chat) => {
-        if (chat.id === chatId && chat.isGroup) {
-          const changes = []
-          if (chat.name !== name) changes.push(`nome in "${name}"`)
-          if (chat.description !== description) changes.push("descrizione")
-
-          if (changes.length > 0) {
-            const systemMessage: Message = {
-              id: `${Date.now()}-group-updated`,
-              text: `${user.name} ha modificato ${changes.join(" e ")} del gruppo`,
-              senderId: "system",
-              senderName: "Sistema",
-              timestamp: new Date(),
-              type: "system",
-              status: "read",
-            }
-
-            return {
-              ...chat,
-              name,
-              description,
-              messages: [...chat.messages, systemMessage],
-              lastMessage: systemMessage,
-            }
-          }
-        }
-        return chat
-      }),
-    )
+      if (error) throw error
+    } catch (error) {
+      console.error("Error updating group:", error)
+    }
   }
 
   const isGroupAdmin = (chatId: string, userId?: string) => {
     const chat = chats.find((c) => c.id === chatId)
-    return chat?.groupAdmins?.includes(userId || user?.id || "") ?? false
+    const participant = chat?.participants.find((p) => p.user_id === (userId || user?.id))
+    return participant?.role === "admin"
   }
 
   return {
     chats,
     activeChat,
     setActiveChat,
+    loading,
     sendMessage,
     sendMediaMessage,
     sendVoiceMessage,
